@@ -103,22 +103,44 @@ jobs:
           CHANNEL="${{ inputs.channel }}"
           TODAY="${{ steps.date.outputs.today }}"
           VIDEO_PATH="data-repo/videos/$TITLE/$PLATFORM.mp4"
+          FILENAME="${TODAY}_${PLATFORM}.mp4"
+          FILESIZE=$(stat -c%s "$VIDEO_PATH")
 
-          # Upload video to Slack
-          RESPONSE=$(curl -s -F "file=@$VIDEO_PATH" \
-            -F "channels=$CHANNEL" \
-            -F "title=$TODAY - $TITLE ($PLATFORM)" \
-            -F "initial_comment=📹 動画ファイル" \
+          # Step 1: Get upload URL
+          UPLOAD_URL_RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-            "https://slack.com/api/files.upload")
+            -H "Content-type: application/x-www-form-urlencoded" \
+            --data-urlencode "filename=$FILENAME" \
+            --data-urlencode "length=$FILESIZE" \
+            "https://slack.com/api/files.getUploadURLExternal")
 
-          echo "Upload response: $RESPONSE"
+          echo "Upload URL response: $UPLOAD_URL_RESPONSE"
 
-          # Check if upload was successful
-          OK=$(echo "$RESPONSE" | jq -r '.ok')
+          UPLOAD_URL=$(echo "$UPLOAD_URL_RESPONSE" | jq -r '.upload_url')
+          FILE_ID=$(echo "$UPLOAD_URL_RESPONSE" | jq -r '.file_id')
+
+          if [ "$UPLOAD_URL" = "null" ]; then
+            echo "Failed to get upload URL"
+            exit 1
+          fi
+
+          # Step 2: Upload file to the URL
+          curl -s -X POST "$UPLOAD_URL" \
+            -F "file=@$VIDEO_PATH"
+
+          # Step 3: Complete the upload
+          COMPLETE_RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-type: application/json" \
+            --data "{\"files\":[{\"id\":\"$FILE_ID\",\"title\":\"$TODAY - $TITLE ($PLATFORM)\"}],\"channel_id\":\"$CHANNEL\",\"initial_comment\":\"📹 動画ファイル\"}" \
+            "https://slack.com/api/files.completeUploadExternal")
+
+          echo "Complete response: $COMPLETE_RESPONSE"
+
+          OK=$(echo "$COMPLETE_RESPONSE" | jq -r '.ok')
           if [ "$OK" != "true" ]; then
-            echo "Failed to upload video"
-            echo "$RESPONSE" | jq .
+            echo "Failed to complete upload"
+            echo "$COMPLETE_RESPONSE" | jq .
             exit 1
           fi
 
