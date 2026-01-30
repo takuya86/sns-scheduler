@@ -3,14 +3,6 @@ name: SNS Post Notification
 on:
   workflow_dispatch:
     inputs:
-      platform:
-        description: 'Platform to post (tiktok or instagram)'
-        required: true
-        default: 'tiktok'
-        type: choice
-        options:
-          - tiktok
-          - instagram
       date:
         description: 'Target date (YYYY-MM-DD, empty for today)'
         required: false
@@ -73,37 +65,47 @@ jobs:
         id: captions
         run: |
           TITLE="${{ steps.schedule.outputs.title }}"
-          PLATFORM="${{ inputs.platform }}"
 
           # Read captions.md
           CAPTIONS=$(cat "data-repo/videos/$TITLE/captions.md")
 
-          # Extract platform-specific caption
-          if [ "$PLATFORM" = "tiktok" ]; then
-            CAPTION=$(echo "$CAPTIONS" | sed -n '/## TikTok/,/## /p' | head -n -1 | tail -n +2)
-          else
-            CAPTION=$(echo "$CAPTIONS" | sed -n '/## Instagram/,/## /p' | head -n -1 | tail -n +2)
-          fi
-
-          # Store caption (handle multiline)
+          # Extract TikTok caption
+          TIKTOK_CAPTION=$(echo "$CAPTIONS" | sed -n '/## TikTok/,/## /p' | head -n -1 | tail -n +2)
           {
-            echo "caption<<EOF"
-            echo "$CAPTION"
+            echo "tiktok<<EOF"
+            echo "$TIKTOK_CAPTION"
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
-      - name: Upload video to Slack
+          # Extract Instagram caption
+          INSTAGRAM_CAPTION=$(echo "$CAPTIONS" | sed -n '/## Instagram/,/## /p' | head -n -1 | tail -n +2)
+          {
+            echo "instagram<<EOF"
+            echo "$INSTAGRAM_CAPTION"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+          # Extract X caption
+          X_CAPTION=$(echo "$CAPTIONS" | sed -n '/## X投稿文/,/## /p' | head -n -1 | tail -n +2)
+          if [ -z "$X_CAPTION" ]; then
+            X_CAPTION=$(echo "$CAPTIONS" | sed -n '/## X投稿文/,$p' | tail -n +2)
+          fi
+          {
+            echo "x<<EOF"
+            echo "$X_CAPTION"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Upload TikTok video to Slack
         if: steps.schedule.outputs.found == 'true'
-        id: upload
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           TITLE="${{ steps.schedule.outputs.title }}"
-          PLATFORM="${{ inputs.platform }}"
           CHANNEL="${{ inputs.channel }}"
           TODAY="${{ steps.date.outputs.today }}"
-          VIDEO_PATH="data-repo/videos/$TITLE/$PLATFORM.mp4"
-          FILENAME="${TODAY}_${PLATFORM}.mp4"
+          VIDEO_PATH="data-repo/videos/$TITLE/tiktok.mp4"
+          FILENAME="${TODAY}_tiktok.mp4"
           FILESIZE=$(stat -c%s "$VIDEO_PATH")
 
           # Step 1: Get upload URL
@@ -114,69 +116,73 @@ jobs:
             --data-urlencode "length=$FILESIZE" \
             "https://slack.com/api/files.getUploadURLExternal")
 
-          echo "Upload URL response: $UPLOAD_URL_RESPONSE"
-
           UPLOAD_URL=$(echo "$UPLOAD_URL_RESPONSE" | jq -r '.upload_url')
           FILE_ID=$(echo "$UPLOAD_URL_RESPONSE" | jq -r '.file_id')
 
-          if [ "$UPLOAD_URL" = "null" ]; then
-            echo "Failed to get upload URL"
-            exit 1
-          fi
+          # Step 2: Upload file
+          curl -s -X POST "$UPLOAD_URL" -F "file=@$VIDEO_PATH"
 
-          # Step 2: Upload file to the URL
-          curl -s -X POST "$UPLOAD_URL" \
-            -F "file=@$VIDEO_PATH"
-
-          # Step 3: Complete the upload
-          COMPLETE_RESPONSE=$(curl -s -X POST \
+          # Step 3: Complete upload
+          curl -s -X POST \
             -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
             -H "Content-type: application/json" \
-            --data "{\"files\":[{\"id\":\"$FILE_ID\",\"title\":\"$TODAY - $TITLE ($PLATFORM)\"}],\"channel_id\":\"$CHANNEL\",\"initial_comment\":\"📹 動画ファイル\"}" \
-            "https://slack.com/api/files.completeUploadExternal")
+            --data "{\"files\":[{\"id\":\"$FILE_ID\",\"title\":\"🎵 TikTok: $TITLE\"}],\"channel_id\":\"$CHANNEL\"}" \
+            "https://slack.com/api/files.completeUploadExternal"
 
-          echo "Complete response: $COMPLETE_RESPONSE"
-
-          OK=$(echo "$COMPLETE_RESPONSE" | jq -r '.ok')
-          if [ "$OK" != "true" ]; then
-            echo "Failed to complete upload"
-            echo "$COMPLETE_RESPONSE" | jq .
-            exit 1
-          fi
-
-      - name: Send Slack message
+      - name: Upload Instagram video to Slack
         if: steps.schedule.outputs.found == 'true'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
-          PLATFORM="${{ inputs.platform }}"
+          TITLE="${{ steps.schedule.outputs.title }}"
+          CHANNEL="${{ inputs.channel }}"
+          TODAY="${{ steps.date.outputs.today }}"
+          VIDEO_PATH="data-repo/videos/$TITLE/instagram.mp4"
+          FILENAME="${TODAY}_instagram.mp4"
+          FILESIZE=$(stat -c%s "$VIDEO_PATH")
+
+          # Step 1: Get upload URL
+          UPLOAD_URL_RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-type: application/x-www-form-urlencoded" \
+            --data-urlencode "filename=$FILENAME" \
+            --data-urlencode "length=$FILESIZE" \
+            "https://slack.com/api/files.getUploadURLExternal")
+
+          UPLOAD_URL=$(echo "$UPLOAD_URL_RESPONSE" | jq -r '.upload_url')
+          FILE_ID=$(echo "$UPLOAD_URL_RESPONSE" | jq -r '.file_id')
+
+          # Step 2: Upload file
+          curl -s -X POST "$UPLOAD_URL" -F "file=@$VIDEO_PATH"
+
+          # Step 3: Complete upload
+          curl -s -X POST \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-type: application/json" \
+            --data "{\"files\":[{\"id\":\"$FILE_ID\",\"title\":\"📸 Instagram: $TITLE\"}],\"channel_id\":\"$CHANNEL\"}" \
+            "https://slack.com/api/files.completeUploadExternal"
+
+      - name: Send Slack summary message
+        if: steps.schedule.outputs.found == 'true'
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
           TITLE="${{ steps.schedule.outputs.title }}"
           TODAY="${{ steps.date.outputs.today }}"
           CHANNEL="${{ inputs.channel }}"
 
-          # Escape caption for JSON
-          CAPTION=$(cat <<'CAPTIONEOF'
-          ${{ steps.captions.outputs.caption }}
-          CAPTIONEOF
-          )
+          TIKTOK_CAPTION='${{ steps.captions.outputs.tiktok }}'
+          INSTAGRAM_CAPTION='${{ steps.captions.outputs.instagram }}'
+          X_CAPTION='${{ steps.captions.outputs.x }}'
 
-          if [ "$PLATFORM" = "tiktok" ]; then
-            EMOJI=":musical_note:"
-            TIME="12:00"
-          else
-            EMOJI=":camera:"
-            TIME="19:00"
-          fi
-
-          # Build Slack message
+          # Build Slack message with jq
           PAYLOAD=$(jq -n \
             --arg channel "$CHANNEL" \
-            --arg emoji "$EMOJI" \
-            --arg platform "$PLATFORM" \
             --arg today "$TODAY" \
-            --arg time "$TIME" \
             --arg title "$TITLE" \
-            --arg caption "$CAPTION" \
+            --arg tiktok "$TIKTOK_CAPTION" \
+            --arg instagram "$INSTAGRAM_CAPTION" \
+            --arg x "$X_CAPTION" \
             '{
               channel: $channel,
               blocks: [
@@ -184,7 +190,7 @@ jobs:
                   type: "header",
                   text: {
                     type: "plain_text",
-                    text: "\($emoji) \($platform) 投稿時間です！",
+                    text: "📢 SNS投稿の時間です！",
                     emoji: true
                   }
                 },
@@ -192,22 +198,27 @@ jobs:
                   type: "section",
                   fields: [
                     { type: "mrkdwn", text: "*日付:*\n\($today)" },
-                    { type: "mrkdwn", text: "*投稿時間:*\n\($time) JST" }
+                    { type: "mrkdwn", text: "*タイトル:*\n\($title)" }
                   ]
-                },
-                {
-                  type: "section",
-                  text: { type: "mrkdwn", text: "*タイトル:*\n\($title)" }
                 },
                 { type: "divider" },
                 {
                   type: "section",
-                  text: { type: "mrkdwn", text: "*キャプション:*\n```\($caption)```" }
+                  text: { type: "mrkdwn", text: "*🎵 TikTokキャプション:*\n```\($tiktok)```" }
+                },
+                { type: "divider" },
+                {
+                  type: "section",
+                  text: { type: "mrkdwn", text: "*📸 Instagramキャプション:*\n```\($instagram)```" }
+                },
+                { type: "divider" },
+                {
+                  type: "section",
+                  text: { type: "mrkdwn", text: "*🐦 X投稿文:*\n```\($x)```" }
                 }
               ]
             }')
 
-          # Send message
           curl -s -X POST \
             -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
             -H "Content-type: application/json" \
