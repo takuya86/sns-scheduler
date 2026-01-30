@@ -15,6 +15,11 @@ on:
         description: 'Target date (YYYY-MM-DD, empty for today)'
         required: false
         type: string
+      channel:
+        description: 'Slack channel ID'
+        required: false
+        default: 'C0AB6SU4HUZ'
+        type: string
 
 jobs:
   notify:
@@ -53,22 +58,27 @@ jobs:
           echo "title=$TITLE" >> $GITHUB_OUTPUT
           echo "found=true" >> $GITHUB_OUTPUT
 
-      - name: Fetch captions
+      - name: Clone data repo with LFS
         if: steps.schedule.outputs.found == 'true'
-        id: captions
         env:
           GH_TOKEN: ${{ secrets.DATA_REPO_PAT }}
         run: |
+          git lfs install
+          git clone --depth 1 "https://$GH_TOKEN@github.com/takuya86/obsidian-sns-data.git" data-repo
+          cd data-repo
+          git lfs pull
+
+      - name: Fetch captions
+        if: steps.schedule.outputs.found == 'true'
+        id: captions
+        run: |
           TITLE="${{ steps.schedule.outputs.title }}"
-          ENCODED_TITLE=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$TITLE'))")
-
-          # Fetch captions.md
-          CAPTIONS=$(curl -sH "Authorization: token $GH_TOKEN" \
-            "https://raw.githubusercontent.com/takuya86/obsidian-sns-data/main/videos/$ENCODED_TITLE/captions.md")
-
-          # Extract platform-specific caption
           PLATFORM="${{ inputs.platform }}"
 
+          # Read captions.md
+          CAPTIONS=$(cat "data-repo/videos/$TITLE/captions.md")
+
+          # Extract platform-specific caption
           if [ "$PLATFORM" = "tiktok" ]; then
             CAPTION=$(echo "$CAPTIONS" | sed -n '/## TikTok/,/## /p' | head -n -1 | tail -n +2)
           else
@@ -82,80 +92,102 @@ jobs:
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
-      - name: Send Slack notification
+      - name: Upload video to Slack
+        if: steps.schedule.outputs.found == 'true'
+        id: upload
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          TITLE="${{ steps.schedule.outputs.title }}"
+          PLATFORM="${{ inputs.platform }}"
+          CHANNEL="${{ inputs.channel }}"
+          TODAY="${{ steps.date.outputs.today }}"
+          VIDEO_PATH="data-repo/videos/$TITLE/$PLATFORM.mp4"
+
+          # Upload video to Slack
+          RESPONSE=$(curl -s -F "file=@$VIDEO_PATH" \
+            -F "channels=$CHANNEL" \
+            -F "title=$TODAY - $TITLE ($PLATFORM)" \
+            -F "initial_comment=📹 動画ファイル" \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            "https://slack.com/api/files.upload")
+
+          echo "Upload response: $RESPONSE"
+
+          # Check if upload was successful
+          OK=$(echo "$RESPONSE" | jq -r '.ok')
+          if [ "$OK" != "true" ]; then
+            echo "Failed to upload video"
+            echo "$RESPONSE" | jq .
+            exit 1
+          fi
+
+      - name: Send Slack message
         if: steps.schedule.outputs.found == 'true'
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           PLATFORM="${{ inputs.platform }}"
           TITLE="${{ steps.schedule.outputs.title }}"
           TODAY="${{ steps.date.outputs.today }}"
-          CAPTION='${{ steps.captions.outputs.caption }}'
+          CHANNEL="${{ inputs.channel }}"
+
+          # Escape caption for JSON
+          CAPTION=$(cat <<'CAPTIONEOF'
+          ${{ steps.captions.outputs.caption }}
+          CAPTIONEOF
+          )
 
           if [ "$PLATFORM" = "tiktok" ]; then
-            EMOJI="🎵"
+            EMOJI=":musical_note:"
             TIME="12:00"
           else
-            EMOJI="📸"
+            EMOJI=":camera:"
             TIME="19:00"
           fi
 
           # Build Slack message
-          PAYLOAD=$(cat <<JSONEOF
-          {
-            "blocks": [
-              {
-                "type": "header",
-                "text": {
-                  "type": "plain_text",
-                  "text": "$EMOJI $PLATFORM 投稿時間です！",
-                  "emoji": true
-                }
-              },
-              {
-                "type": "section",
-                "fields": [
-                  {
-                    "type": "mrkdwn",
-                    "text": "*日付:*\n$TODAY"
-                  },
-                  {
-                    "type": "mrkdwn",
-                    "text": "*投稿時間:*\n$TIME JST"
+          PAYLOAD=$(jq -n \
+            --arg channel "$CHANNEL" \
+            --arg emoji "$EMOJI" \
+            --arg platform "$PLATFORM" \
+            --arg today "$TODAY" \
+            --arg time "$TIME" \
+            --arg title "$TITLE" \
+            --arg caption "$CAPTION" \
+            '{
+              channel: $channel,
+              blocks: [
+                {
+                  type: "header",
+                  text: {
+                    type: "plain_text",
+                    text: "\($emoji) \($platform) 投稿時間です！",
+                    emoji: true
                   }
-                ]
-              },
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "*タイトル:*\n$TITLE"
+                },
+                {
+                  type: "section",
+                  fields: [
+                    { type: "mrkdwn", text: "*日付:*\n\($today)" },
+                    { type: "mrkdwn", text: "*投稿時間:*\n\($time) JST" }
+                  ]
+                },
+                {
+                  type: "section",
+                  text: { type: "mrkdwn", text: "*タイトル:*\n\($title)" }
+                },
+                { type: "divider" },
+                {
+                  type: "section",
+                  text: { type: "mrkdwn", text: "*キャプション:*\n```\($caption)```" }
                 }
-              },
-              {
-                "type": "divider"
-              },
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "*キャプション:*\n\`\`\`$CAPTION\`\`\`"
-                }
-              },
-              {
-                "type": "context",
-                "elements": [
-                  {
-                    "type": "mrkdwn",
-                    "text": "📁 動画: <https://github.com/takuya86/obsidian-sns-data/blob/main/videos/$TITLE/$PLATFORM.mp4|GitHub で確認>"
-                  }
-                ]
-              }
-            ]
-          }
-          JSONEOF
-          )
+              ]
+            }')
 
-          curl -X POST -H 'Content-type: application/json' \
+          # Send message
+          curl -s -X POST \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-type: application/json" \
             --data "$PAYLOAD" \
-            "$SLACK_WEBHOOK_URL"
+            "https://slack.com/api/chat.postMessage"
