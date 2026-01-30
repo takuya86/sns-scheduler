@@ -11,6 +11,10 @@ on:
         options:
           - tiktok
           - instagram
+      date:
+        description: 'Target date (YYYY-MM-DD, empty for today)'
+        required: false
+        type: string
 
 jobs:
   notify:
@@ -19,7 +23,11 @@ jobs:
       - name: Get current date (JST)
         id: date
         run: |
-          echo "today=$(TZ='Asia/Tokyo' date '+%Y-%m-%d')" >> $GITHUB_OUTPUT
+          if [ -n "${{ inputs.date }}" ]; then
+            echo "today=${{ inputs.date }}" >> $GITHUB_OUTPUT
+          else
+            echo "today=$(TZ='Asia/Tokyo' date '+%Y-%m-%d')" >> $GITHUB_OUTPUT
+          fi
 
       - name: Fetch schedule from data repo
         id: schedule
@@ -32,7 +40,7 @@ jobs:
 
           # Find today's post
           TODAY="${{ steps.date.outputs.today }}"
-          LINE=$(echo "$SCHEDULE" | grep "^| $TODAY")
+          LINE=$(echo "$SCHEDULE" | grep "^| $TODAY" || true)
 
           if [ -z "$LINE" ]; then
             echo "No post scheduled for today ($TODAY)"
