@@ -10,8 +10,15 @@ jobs:
   fetch-analytics:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout sns-scheduler
         uses: actions/checkout@v4
+
+      - name: Checkout obsidian-sns-data
+        uses: actions/checkout@v4
+        with:
+          repository: takuya86/obsidian-sns-data
+          path: obsidian-sns-data
+          token: ${{ secrets.DATA_REPO_PAT }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -140,6 +147,65 @@ jobs:
           echo "result<<EOF" >> $GITHUB_OUTPUT
           echo "$RESULT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Save to obsidian-sns-data
+        if: success()
+        run: |
+          RESULT='${{ steps.analytics.outputs.result }}'
+          DATE=$(TZ='Asia/Tokyo' date '+%Y-%m-%d')
+
+          # Create analytics markdown
+          cat << EOF > obsidian-sns-data/jimu-note/analytics.md
+          # noteアナリティクス
+
+          更新日: ${DATE}
+          自動生成: GitHub Actions
+
+          ---
+
+          ## サマリー
+
+          | 期間 | 総ビュー | 総スキ |
+          |------|----------|--------|
+          | 週間 | $(echo "$RESULT" | jq -r '.periods.week.totalViews') | $(echo "$RESULT" | jq -r '.periods.week.totalLikes') |
+          | 月間 | $(echo "$RESULT" | jq -r '.periods.month.totalViews') | $(echo "$RESULT" | jq -r '.periods.month.totalLikes') |
+          | 年間 | $(echo "$RESULT" | jq -r '.periods.year.totalViews') | $(echo "$RESULT" | jq -r '.periods.year.totalLikes') |
+          | 全期間 | $(echo "$RESULT" | jq -r '.periods.all.totalViews') | $(echo "$RESULT" | jq -r '.periods.all.totalLikes') |
+
+          ---
+
+          ## 週間Top5
+
+          | 順位 | タイトル | ビュー | スキ |
+          |------|---------|--------|------|
+          | 1 | $(echo "$RESULT" | jq -r '.periods.week.top5[0].title') | $(echo "$RESULT" | jq -r '.periods.week.top5[0].views') | $(echo "$RESULT" | jq -r '.periods.week.top5[0].likes') |
+          | 2 | $(echo "$RESULT" | jq -r '.periods.week.top5[1].title') | $(echo "$RESULT" | jq -r '.periods.week.top5[1].views') | $(echo "$RESULT" | jq -r '.periods.week.top5[1].likes') |
+          | 3 | $(echo "$RESULT" | jq -r '.periods.week.top5[2].title') | $(echo "$RESULT" | jq -r '.periods.week.top5[2].views') | $(echo "$RESULT" | jq -r '.periods.week.top5[2].likes') |
+          | 4 | $(echo "$RESULT" | jq -r '.periods.week.top5[3].title') | $(echo "$RESULT" | jq -r '.periods.week.top5[3].views') | $(echo "$RESULT" | jq -r '.periods.week.top5[3].likes') |
+          | 5 | $(echo "$RESULT" | jq -r '.periods.week.top5[4].title') | $(echo "$RESULT" | jq -r '.periods.week.top5[4].views') | $(echo "$RESULT" | jq -r '.periods.week.top5[4].likes') |
+
+          ---
+
+          ## 月間Top5
+
+          | 順位 | タイトル | ビュー | スキ |
+          |------|---------|--------|------|
+          | 1 | $(echo "$RESULT" | jq -r '.periods.month.top5[0].title') | $(echo "$RESULT" | jq -r '.periods.month.top5[0].views') | $(echo "$RESULT" | jq -r '.periods.month.top5[0].likes') |
+          | 2 | $(echo "$RESULT" | jq -r '.periods.month.top5[1].title') | $(echo "$RESULT" | jq -r '.periods.month.top5[1].views') | $(echo "$RESULT" | jq -r '.periods.month.top5[1].likes') |
+          | 3 | $(echo "$RESULT" | jq -r '.periods.month.top5[2].title') | $(echo "$RESULT" | jq -r '.periods.month.top5[2].views') | $(echo "$RESULT" | jq -r '.periods.month.top5[2].likes') |
+          | 4 | $(echo "$RESULT" | jq -r '.periods.month.top5[3].title') | $(echo "$RESULT" | jq -r '.periods.month.top5[3].views') | $(echo "$RESULT" | jq -r '.periods.month.top5[3].likes') |
+          | 5 | $(echo "$RESULT" | jq -r '.periods.month.top5[4].title') | $(echo "$RESULT" | jq -r '.periods.month.top5[4].views') | $(echo "$RESULT" | jq -r '.periods.month.top5[4].likes') |
+          EOF
+
+      - name: Commit to obsidian-sns-data
+        if: success()
+        run: |
+          cd obsidian-sns-data
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add jimu-note/analytics.md
+          git diff --staged --quiet || git commit -m "Update analytics $(TZ='Asia/Tokyo' date '+%Y-%m-%d')"
+          git push
 
       - name: Send to Slack
         if: success()
