@@ -142,7 +142,7 @@ jobs:
       - name: Send Slack notification
         if: steps.post.outputs.skip != 'true'
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_JIMU }}
         run: |
           TYPE="${{ steps.post.outputs.type }}"
           NUM="${{ steps.post.outputs.num }}"
