@@ -1,0 +1,184 @@
+name: X jimu-note Post Notification
+
+on:
+  workflow_dispatch:
+    inputs:
+      timing:
+        description: 'Timing (morning/noon/evening)'
+        required: true
+        type: choice
+        options:
+          - morning
+          - noon
+          - evening
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get current info (JST)
+        id: info
+        run: |
+          # 曜日を取得（0=日曜, 1=月曜, ... 6=土曜）
+          DOW=$(TZ='Asia/Tokyo' date '+%w')
+          TODAY=$(TZ='Asia/Tokyo' date '+%Y-%m-%d')
+          echo "dow=$DOW" >> $GITHUB_OUTPUT
+          echo "today=$TODAY" >> $GITHUB_OUTPUT
+
+          # 曜日名
+          case $DOW in
+            0) DOW_NAME="日曜" ;;
+            1) DOW_NAME="月曜" ;;
+            2) DOW_NAME="火曜" ;;
+            3) DOW_NAME="水曜" ;;
+            4) DOW_NAME="木曜" ;;
+            5) DOW_NAME="金曜" ;;
+            6) DOW_NAME="土曜" ;;
+          esac
+          echo "dow_name=$DOW_NAME" >> $GITHUB_OUTPUT
+
+      - name: Determine post type and number
+        id: post
+        run: |
+          DOW=${{ steps.info.outputs.dow }}
+          TIMING="${{ inputs.timing }}"
+
+          # 日曜の場合
+          if [ "$DOW" = "0" ]; then
+            if [ "$TIMING" = "noon" ]; then
+              echo "type=フィルタ" >> $GITHUB_OUTPUT
+              echo "num=1" >> $GITHUB_OUTPUT
+              echo "time=12:00" >> $GITHUB_OUTPUT
+              echo "skip=false" >> $GITHUB_OUTPUT
+            else
+              echo "skip=true" >> $GITHUB_OUTPUT
+            fi
+            exit 0
+          fi
+
+          # 月〜土の場合（DOW 1-6 → ポスト番号 1-6）
+          POST_NUM=$DOW
+
+          if [ "$TIMING" = "morning" ]; then
+            echo "type=集客" >> $GITHUB_OUTPUT
+            echo "num=$POST_NUM" >> $GITHUB_OUTPUT
+            echo "time=7:00" >> $GITHUB_OUTPUT
+            echo "skip=false" >> $GITHUB_OUTPUT
+          elif [ "$TIMING" = "evening" ]; then
+            echo "type=教育" >> $GITHUB_OUTPUT
+            echo "num=$POST_NUM" >> $GITHUB_OUTPUT
+            echo "time=20:00" >> $GITHUB_OUTPUT
+            echo "skip=false" >> $GITHUB_OUTPUT
+          else
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Fetch post content
+        if: steps.post.outputs.skip != 'true'
+        id: content
+        env:
+          GH_TOKEN: ${{ secrets.DATA_REPO_PAT }}
+        run: |
+          TYPE="${{ steps.post.outputs.type }}"
+          NUM="${{ steps.post.outputs.num }}"
+
+          # posts.mdを取得
+          POSTS=$(curl -sH "Authorization: token $GH_TOKEN" \
+            "https://raw.githubusercontent.com/takuya86/obsidian-sns-data/main/jimu-note/posts.md")
+
+          # 該当するポストを抽出（### タイプN から次の ### まで）
+          PATTERN="${TYPE}${NUM}"
+          POST_CONTENT=$(echo "$POSTS" | sed -n "/### ${PATTERN}$/,/^###/p" | head -n -1 | tail -n +2)
+
+          # コードブロック内のテキストを抽出
+          POST_TEXT=$(echo "$POST_CONTENT" | sed -n '/^```$/,/^```$/p' | sed '1d;$d')
+
+          # GitHub Outputに保存
+          {
+            echo "text<<EOF"
+            echo "$POST_TEXT"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Send Slack notification
+        if: steps.post.outputs.skip != 'true'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_JIMU }}
+        run: |
+          TYPE="${{ steps.post.outputs.type }}"
+          NUM="${{ steps.post.outputs.num }}"
+          TIME="${{ steps.post.outputs.time }}"
+          TODAY="${{ steps.info.outputs.today }}"
+          DOW_NAME="${{ steps.info.outputs.dow_name }}"
+          TIMING="${{ inputs.timing }}"
+          POST_TEXT='${{ steps.content.outputs.text }}'
+
+          # タイミングに応じたメッセージ
+          if [ "$TIMING" = "morning" ]; then
+            HEADER="朝の投稿準備"
+            NOTE="前日夜に予約投稿してください"
+          elif [ "$TIMING" = "noon" ]; then
+            HEADER="昼の投稿時間"
+            NOTE="今すぐ投稿してください"
+          else
+            HEADER="夜の投稿時間"
+            NOTE="今すぐ投稿してください"
+          fi
+
+          # Slackメッセージ作成
+          PAYLOAD=$(jq -n \
+            --arg header "$HEADER" \
+            --arg today "$TODAY" \
+            --arg dow "$DOW_NAME" \
+            --arg type "$TYPE" \
+            --arg num "$NUM" \
+            --arg time "$TIME" \
+            --arg text "$POST_TEXT" \
+            --arg note "$NOTE" \
+            '{
+              blocks: [
+                {
+                  type: "header",
+                  text: {
+                    type: "plain_text",
+                    text: "X \($header)",
+                    emoji: true
+                  }
+                },
+                {
+                  type: "section",
+                  fields: [
+                    { type: "mrkdwn", text: "*日付:*\n\($today) (\($dow))" },
+                    { type: "mrkdwn", text: "*投稿時間:*\n\($time)" }
+                  ]
+                },
+                {
+                  type: "section",
+                  fields: [
+                    { type: "mrkdwn", text: "*タイプ:*\n\($type)" },
+                    { type: "mrkdwn", text: "*番号:*\n\($num)" }
+                  ]
+                },
+                { type: "divider" },
+                {
+                  type: "section",
+                  text: { type: "mrkdwn", text: "*投稿内容:*\n```\($text)```" }
+                },
+                {
+                  type: "context",
+                  elements: [
+                    { type: "mrkdwn", text: "\($note)" }
+                  ]
+                }
+              ]
+            }')
+
+          curl -s -X POST \
+            -H "Content-type: application/json" \
+            --data "$PAYLOAD" \
+            "$SLACK_WEBHOOK_URL"
+
+      - name: No post today
+        if: steps.post.outputs.skip == 'true'
+        run: |
+          echo "No post scheduled for this timing"
