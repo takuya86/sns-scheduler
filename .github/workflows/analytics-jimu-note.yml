@@ -142,6 +142,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Send to Slack
+        if: success()
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_JIMU }}
         run: |
@@ -170,6 +171,23 @@ jobs:
           MESSAGE+="2. ${TOP2}\n"
           MESSAGE+="3. ${TOP3}\n\n"
           MESSAGE+="📈 https://note.com/sitesettings/stats"
+
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\": \"$MESSAGE\"}" \
+            "$SLACK_WEBHOOK"
+
+      - name: Notify failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_JIMU }}
+        run: |
+          MESSAGE="⚠️ *アナリティクス取得失敗*\n\n"
+          MESSAGE+="noteのCookieが切れた可能性があります。\n\n"
+          MESSAGE+="*対応手順:*\n"
+          MESSAGE+="1. noteにログインし直す\n"
+          MESSAGE+="2. Cookieを取得\n"
+          MESSAGE+="3. GitHub Secrets の NOTE_COOKIES_JIMU_AI を更新\n\n"
+          MESSAGE+="🔧 https://github.com/takuya86/sns-scheduler/settings/secrets/actions"
 
           curl -X POST -H 'Content-type: application/json' \
             --data "{\"text\": \"$MESSAGE\"}" \
