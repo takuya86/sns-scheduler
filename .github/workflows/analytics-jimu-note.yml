@@ -1,0 +1,176 @@
+name: note Analytics (jimu-ai)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 毎週月曜 9:00 JST (日曜 24:00 UTC)
+    - cron: '0 0 * * 1'
+
+jobs:
+  fetch-analytics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          npm install playwright
+          npx playwright install chromium
+
+      - name: Create cookie file
+        run: |
+          mkdir -p profiles/jimu-ai/cookies
+          echo '${{ secrets.NOTE_COOKIES_JIMU_AI }}' > profiles/jimu-ai/cookies/note-session.json
+
+      - name: Create analytics script
+        run: |
+          cat << 'SCRIPT' > sync-analytics.js
+          const { chromium } = require('playwright');
+          const fs = require('fs');
+          const path = require('path');
+
+          const profile = 'jimu-ai';
+          const PERIODS = [
+            { key: 'week', label: '週間', tabText: '週' },
+            { key: 'month', label: '月間', tabText: '月' },
+            { key: 'year', label: '年間', tabText: '年' },
+            { key: 'all', label: '全期間', tabText: '全期間' }
+          ];
+
+          async function main() {
+            const cookiesFile = `profiles/${profile}/cookies/note-session.json`;
+            const cookies = JSON.parse(fs.readFileSync(cookiesFile, 'utf-8'));
+
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext();
+            await context.addCookies(cookies);
+            const page = await context.newPage();
+
+            const allData = { fetchedAt: new Date().toISOString(), profile, periods: {} };
+
+            await page.goto('https://note.com/sitesettings/stats', { waitUntil: 'networkidle' });
+            await page.waitForTimeout(3000);
+
+            for (const period of PERIODS) {
+              try {
+                const tabs = await page.$$('button.btn');
+                for (const tab of tabs) {
+                  const text = await tab.innerText();
+                  if (text.trim() === period.tabText) {
+                    const isDisabled = await tab.isDisabled();
+                    if (!isDisabled) {
+                      await tab.click();
+                      await page.waitForTimeout(2000);
+                    }
+                    break;
+                  }
+                }
+              } catch (e) {}
+
+              // Load all articles
+              for (let i = 0; i < 20; i++) {
+                try {
+                  const moreButton = await page.$('button:has-text("もっとみる")');
+                  if (!moreButton || !(await moreButton.isVisible())) break;
+                  await moreButton.click();
+                  await page.waitForTimeout(1000);
+                } catch (e) { break; }
+              }
+
+              const summary = await page.evaluate(() => {
+                const text = document.body.innerText;
+                const viewMatch = text.match(/(\d[\d,]*)\s*全体ビュー/);
+                const likesMatch = text.match(/(\d[\d,]*)\s*スキ/);
+                return {
+                  totalViews: viewMatch ? parseInt(viewMatch[1].replace(/,/g, ''), 10) : 0,
+                  totalLikes: likesMatch ? parseInt(likesMatch[1].replace(/,/g, ''), 10) : 0
+                };
+              });
+
+              const articles = await page.evaluate(() => {
+                const results = [];
+                document.querySelectorAll('table tbody tr, table tr').forEach(row => {
+                  const cells = row.querySelectorAll('td, th');
+                  if (cells.length < 3) return;
+                  const titleText = cells[0].innerText.trim();
+                  if (!titleText || titleText === '記事') return;
+                  const numbers = [];
+                  for (let i = 1; i < cells.length; i++) {
+                    const num = parseInt(cells[i].innerText.replace(/,/g, '').trim(), 10);
+                    numbers.push(isNaN(num) ? 0 : num);
+                  }
+                  results.push({
+                    title: titleText.replace(/\s*（削除済み）.*$/, '').substring(0, 60),
+                    views: numbers[0] || 0,
+                    likes: numbers[2] || 0
+                  });
+                });
+                return results;
+              });
+
+              allData.periods[period.key] = {
+                label: period.label,
+                totalViews: summary.totalViews,
+                totalLikes: summary.totalLikes,
+                articleCount: articles.length,
+                top5: articles.sort((a, b) => b.views - a.views).slice(0, 5)
+              };
+            }
+
+            await browser.close();
+            console.log(JSON.stringify(allData, null, 2));
+          }
+
+          main().catch(e => {
+            console.error('Error:', e.message);
+            process.exit(1);
+          });
+          SCRIPT
+
+      - name: Fetch analytics
+        id: analytics
+        run: |
+          RESULT=$(node sync-analytics.js)
+          echo "result<<EOF" >> $GITHUB_OUTPUT
+          echo "$RESULT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Send to Slack
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_JIMU }}
+        run: |
+          RESULT='${{ steps.analytics.outputs.result }}'
+
+          # Parse JSON and create message
+          WEEK_VIEWS=$(echo "$RESULT" | jq -r '.periods.week.totalViews')
+          WEEK_LIKES=$(echo "$RESULT" | jq -r '.periods.week.totalLikes')
+          MONTH_VIEWS=$(echo "$RESULT" | jq -r '.periods.month.totalViews')
+          MONTH_LIKES=$(echo "$RESULT" | jq -r '.periods.month.totalLikes')
+          ALL_VIEWS=$(echo "$RESULT" | jq -r '.periods.all.totalViews')
+          ALL_LIKES=$(echo "$RESULT" | jq -r '.periods.all.totalLikes')
+
+          # Get top 3 weekly articles
+          TOP1=$(echo "$RESULT" | jq -r '.periods.week.top5[0] | "\(.title) (\(.views)PV)"')
+          TOP2=$(echo "$RESULT" | jq -r '.periods.week.top5[1] | "\(.title) (\(.views)PV)"')
+          TOP3=$(echo "$RESULT" | jq -r '.periods.week.top5[2] | "\(.title) (\(.views)PV)"')
+
+          MESSAGE="📊 *週次アナリティクスレポート*\n\n"
+          MESSAGE+="*サマリー*\n"
+          MESSAGE+="• 週間: ${WEEK_VIEWS}PV / ${WEEK_LIKES}スキ\n"
+          MESSAGE+="• 月間: ${MONTH_VIEWS}PV / ${MONTH_LIKES}スキ\n"
+          MESSAGE+="• 全期間: ${ALL_VIEWS}PV / ${ALL_LIKES}スキ\n\n"
+          MESSAGE+="*週間Top3*\n"
+          MESSAGE+="1. ${TOP1}\n"
+          MESSAGE+="2. ${TOP2}\n"
+          MESSAGE+="3. ${TOP3}\n\n"
+          MESSAGE+="📈 https://note.com/sitesettings/stats"
+
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\": \"$MESSAGE\"}" \
+            "$SLACK_WEBHOOK"
