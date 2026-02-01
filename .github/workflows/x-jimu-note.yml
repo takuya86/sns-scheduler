@@ -125,9 +125,10 @@ jobs:
           POSTS=$(curl -sH "Authorization: token $GH_TOKEN" \
             "https://raw.githubusercontent.com/takuya86/obsidian-sns-data/main/jimu-note/posts.md")
 
-          # 該当するポストを抽出（### タイプN から次の ### まで）
+          # 該当するポストを抽出（### タイプN から次の ### または EOF まで）
           PATTERN="${TYPE}${NUM}"
-          POST_CONTENT=$(echo "$POSTS" | sed -n "/### ${PATTERN}$/,/^###/p" | head -n -1 | tail -n +2)
+          # ファイル末尾に対応するため、次の###またはファイル終端まで取得
+          POST_CONTENT=$(echo "$POSTS" | awk "/### ${PATTERN}\$/{found=1; next} found && /^###/{exit} found{print}")
 
           # コードブロック内のテキストを抽出
           POST_TEXT=$(echo "$POST_CONTENT" | sed -n '/^```$/,/^```$/p' | sed '1d;$d')
