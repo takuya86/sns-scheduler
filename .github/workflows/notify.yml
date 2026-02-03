@@ -7,6 +7,11 @@ on:
         description: 'Target date (YYYY-MM-DD, empty for today)'
         required: false
         type: string
+      row:
+        description: 'Row number for same-date entries (1, 2, 3...)'
+        required: false
+        default: '1'
+        type: string
       channel:
         description: 'Slack channel ID'
         required: false
@@ -35,9 +40,10 @@ jobs:
           SCHEDULE=$(curl -sH "Authorization: token $GH_TOKEN" \
             "https://raw.githubusercontent.com/takuya86/obsidian-sns-data/main/schedule.md")
 
-          # Find today's post
+          # Find today's post (specific row for same-date entries)
           TODAY="${{ steps.date.outputs.today }}"
-          LINE=$(echo "$SCHEDULE" | grep "^| $TODAY" || true)
+          ROW="${{ inputs.row }}"
+          LINE=$(echo "$SCHEDULE" | grep "^| $TODAY" | sed -n "${ROW}p" || true)
 
           if [ -z "$LINE" ]; then
             echo "No post scheduled for today ($TODAY)"
