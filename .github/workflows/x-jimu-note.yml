@@ -52,10 +52,11 @@ jobs:
           # 日曜の場合
           if [ "$DOW" = "0" ]; then
             if [ "$TIMING" = "noon" ]; then
-              echo "type=フィルタ" >> $GITHUB_OUTPUT
-              echo "num=1" >> $GITHUB_OUTPUT
+              echo "type=改善_" >> $GITHUB_OUTPUT
+              POST_NUM=$(( (2 + WEEK_NUM - 1) % 5 + 1 ))
+              echo "num=$POST_NUM" >> $GITHUB_OUTPUT
               echo "time=12:00" >> $GITHUB_OUTPUT
-              echo "stage=期待値調整" >> $GITHUB_OUTPUT
+              echo "stage=改善ログ" >> $GITHUB_OUTPUT
               echo "skip=false" >> $GITHUB_OUTPUT
             else
               echo "skip=true" >> $GITHUB_OUTPUT
@@ -63,19 +64,25 @@ jobs:
             exit 0
           fi
 
-          # ローテーション:
-          # 月: 集客(朝) / 教育(夜)
-          # 火: note誘導(朝) / ビジョン(夜)
-          # 水: 集客(朝) / 教育(夜)
-          # 木: ビジョン(朝) / note誘導(夜)
-          # 金: 集客(朝) / 確信(夜)
-          # 土: note誘導(朝) / 確信(夜)
+          # ローテーション（新キャラ設計対応）:
+          # 月: 1手(朝) / 教育(夜)
+          # 火: 口癖(朝) / ビジョン(夜)
+          # 水: 改善(朝) / 教育(夜)
+          # 木: 1手(朝) / note誘導(夜)
+          # 金: 愚痴(朝) / 確信(夜)
+          # 土: テンプレ(朝) / 確信(夜)
+          # 日: 改善(昼)
 
           # ポスト番号計算
-          # 集客/教育: 月・水・金 → POS 1,2,3
-          # ビジョン: 火夜・木朝 → POS 1,2
-          # 確信: 金夜・土夜 → POS 1,2
-          # note誘導: 火朝・木夜・土朝 → POS 1,2,3
+          # 1手: 月朝・木朝 → 1手_1〜8
+          # 口癖: 火朝 → 口癖_1〜8
+          # 改善: 水朝・日昼 → 改善_1〜5
+          # 愚痴: 金朝 → 愚痴_1〜4
+          # テンプレ: 土朝 → テンプレ_1〜3
+          # 教育: 月夜・水夜 → 教育1〜7
+          # ビジョン: 火夜 → ビジョン1〜7
+          # note誘導: 木夜 → note誘導1〜7
+          # 確信: 金夜・土夜 → 確信1〜7
 
           # 週番号に応じたオフセット（7本ローテーション）
           case $WEEK_NUM in
@@ -87,10 +94,10 @@ jobs:
           case $DOW in
             1) # 月曜
               if [ "$TIMING" = "morning" ]; then
-                echo "type=集客" >> $GITHUB_OUTPUT
-                echo "stage=Stage1: 認知" >> $GITHUB_OUTPUT
-                echo "time=7:00" >> $GITHUB_OUTPUT
-                POST_NUM=$(( (1 + OFFSET - 1) % 7 + 1 ))
+                echo "type=1手_" >> $GITHUB_OUTPUT
+                echo "stage=会議後の1手" >> $GITHUB_OUTPUT
+                echo "time=7:30" >> $GITHUB_OUTPUT
+                POST_NUM=$(( (1 + OFFSET - 1) % 8 + 1 ))
               else
                 echo "type=教育" >> $GITHUB_OUTPUT
                 echo "stage=Stage3: 信頼" >> $GITHUB_OUTPUT
@@ -100,10 +107,10 @@ jobs:
               ;;
             2) # 火曜
               if [ "$TIMING" = "morning" ]; then
-                echo "type=note誘導" >> $GITHUB_OUTPUT
-                echo "stage=note導線" >> $GITHUB_OUTPUT
-                echo "time=7:00" >> $GITHUB_OUTPUT
-                POST_NUM=$(( (1 + OFFSET - 1) % 7 + 1 ))
+                echo "type=口癖_" >> $GITHUB_OUTPUT
+                echo "stage=口癖シリーズ" >> $GITHUB_OUTPUT
+                echo "time=7:30" >> $GITHUB_OUTPUT
+                POST_NUM=$(( (1 + OFFSET - 1) % 8 + 1 ))
               else
                 echo "type=ビジョン" >> $GITHUB_OUTPUT
                 echo "stage=Stage2: 興味" >> $GITHUB_OUTPUT
@@ -113,10 +120,10 @@ jobs:
               ;;
             3) # 水曜
               if [ "$TIMING" = "morning" ]; then
-                echo "type=集客" >> $GITHUB_OUTPUT
-                echo "stage=Stage1: 認知" >> $GITHUB_OUTPUT
-                echo "time=7:00" >> $GITHUB_OUTPUT
-                POST_NUM=$(( (2 + OFFSET - 1) % 7 + 1 ))
+                echo "type=改善_" >> $GITHUB_OUTPUT
+                echo "stage=改善ログ" >> $GITHUB_OUTPUT
+                echo "time=7:30" >> $GITHUB_OUTPUT
+                POST_NUM=$(( (1 + OFFSET - 1) % 5 + 1 ))
               else
                 echo "type=教育" >> $GITHUB_OUTPUT
                 echo "stage=Stage3: 信頼" >> $GITHUB_OUTPUT
@@ -126,23 +133,23 @@ jobs:
               ;;
             4) # 木曜
               if [ "$TIMING" = "morning" ]; then
-                echo "type=ビジョン" >> $GITHUB_OUTPUT
-                echo "stage=Stage2: 興味" >> $GITHUB_OUTPUT
-                echo "time=7:00" >> $GITHUB_OUTPUT
-                POST_NUM=$(( (2 + OFFSET - 1) % 7 + 1 ))
+                echo "type=1手_" >> $GITHUB_OUTPUT
+                echo "stage=会議後の1手" >> $GITHUB_OUTPUT
+                echo "time=7:30" >> $GITHUB_OUTPUT
+                POST_NUM=$(( (2 + OFFSET - 1) % 8 + 1 ))
               else
                 echo "type=note誘導" >> $GITHUB_OUTPUT
                 echo "stage=note導線" >> $GITHUB_OUTPUT
                 echo "time=20:00" >> $GITHUB_OUTPUT
-                POST_NUM=$(( (2 + OFFSET - 1) % 7 + 1 ))
+                POST_NUM=$(( (1 + OFFSET - 1) % 7 + 1 ))
               fi
               ;;
             5) # 金曜
               if [ "$TIMING" = "morning" ]; then
-                echo "type=集客" >> $GITHUB_OUTPUT
-                echo "stage=Stage1: 認知" >> $GITHUB_OUTPUT
-                echo "time=7:00" >> $GITHUB_OUTPUT
-                POST_NUM=$(( (3 + OFFSET - 1) % 7 + 1 ))
+                echo "type=愚痴_" >> $GITHUB_OUTPUT
+                echo "stage=愚痴供養" >> $GITHUB_OUTPUT
+                echo "time=7:30" >> $GITHUB_OUTPUT
+                POST_NUM=$(( (1 + OFFSET - 1) % 4 + 1 ))
               else
                 echo "type=確信" >> $GITHUB_OUTPUT
                 echo "stage=Stage4: 確信" >> $GITHUB_OUTPUT
@@ -152,10 +159,10 @@ jobs:
               ;;
             6) # 土曜
               if [ "$TIMING" = "morning" ]; then
-                echo "type=note誘導" >> $GITHUB_OUTPUT
-                echo "stage=note導線" >> $GITHUB_OUTPUT
-                echo "time=7:00" >> $GITHUB_OUTPUT
-                POST_NUM=$(( (3 + OFFSET - 1) % 7 + 1 ))
+                echo "type=テンプレ_" >> $GITHUB_OUTPUT
+                echo "stage=テンプレ紹介" >> $GITHUB_OUTPUT
+                echo "time=7:30" >> $GITHUB_OUTPUT
+                POST_NUM=$(( (1 + OFFSET - 1) % 3 + 1 ))
               else
                 echo "type=確信" >> $GITHUB_OUTPUT
                 echo "stage=Stage4: 確信" >> $GITHUB_OUTPUT
