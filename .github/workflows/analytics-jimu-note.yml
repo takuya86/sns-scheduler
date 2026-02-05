@@ -3,8 +3,8 @@ name: note Analytics (jimu-ai)
 on:
   workflow_dispatch:
   schedule:
-    # 毎週月曜 9:00 JST (日曜 24:00 UTC)
-    - cron: '0 0 * * 1'
+    # 毎日 9:00 JST (0:00 UTC)
+    - cron: '0 0 * * *'
 
 jobs:
   fetch-analytics:
@@ -227,7 +227,7 @@ jobs:
           TOP2=$(echo "$RESULT" | jq -r '.periods.week.top5[1] | "\(.title) (\(.views)PV)"')
           TOP3=$(echo "$RESULT" | jq -r '.periods.week.top5[2] | "\(.title) (\(.views)PV)"')
 
-          MESSAGE="📊 *週次アナリティクスレポート*\n\n"
+          MESSAGE="📊 *日次アナリティクスレポート*\n\n"
           MESSAGE+="*サマリー*\n"
           MESSAGE+="• 週間: ${WEEK_VIEWS}PV / ${WEEK_LIKES}スキ\n"
           MESSAGE+="• 月間: ${MONTH_VIEWS}PV / ${MONTH_LIKES}スキ\n"
