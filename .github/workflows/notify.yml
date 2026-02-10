@@ -135,6 +135,24 @@ jobs:
             --data "{\"files\":[{\"id\":\"$FILE_ID\",\"title\":\"🎵 TikTok: $TITLE\"}],\"channel_id\":\"$CHANNEL\"}" \
             "https://slack.com/api/files.completeUploadExternal"
 
+      - name: Send TikTok caption
+        if: steps.schedule.outputs.found == 'true'
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          CHANNEL="${{ inputs.channel }}"
+          TIKTOK_CAPTION='${{ steps.captions.outputs.tiktok }}'
+
+          # ハッシュタグの前に@riko_renai_adviceを挿入
+          # 最初の#の前に@riko_renai_adviceを追加
+          TIKTOK_WITH_MENTION=$(echo "$TIKTOK_CAPTION" | sed 's/#/@riko_renai_advice\n\n#/1')
+
+          curl -s -X POST \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-type: application/json" \
+            --data "$(jq -n --arg channel "$CHANNEL" --arg text "$TIKTOK_WITH_MENTION" '{channel: $channel, text: $text}')" \
+            "https://slack.com/api/chat.postMessage"
+
       - name: Upload Instagram video to Slack
         if: steps.schedule.outputs.found == 'true'
         env:
@@ -168,65 +186,16 @@ jobs:
             --data "{\"files\":[{\"id\":\"$FILE_ID\",\"title\":\"📸 Instagram: $TITLE\"}],\"channel_id\":\"$CHANNEL\"}" \
             "https://slack.com/api/files.completeUploadExternal"
 
-      - name: Send Slack summary message
+      - name: Send Instagram caption
         if: steps.schedule.outputs.found == 'true'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
-          TITLE="${{ steps.schedule.outputs.title }}"
-          TODAY="${{ steps.date.outputs.today }}"
           CHANNEL="${{ inputs.channel }}"
-
-          TIKTOK_CAPTION='${{ steps.captions.outputs.tiktok }}'
           INSTAGRAM_CAPTION='${{ steps.captions.outputs.instagram }}'
-          X_CAPTION='${{ steps.captions.outputs.x }}'
-
-          # Build Slack message with jq
-          PAYLOAD=$(jq -n \
-            --arg channel "$CHANNEL" \
-            --arg today "$TODAY" \
-            --arg title "$TITLE" \
-            --arg tiktok "$TIKTOK_CAPTION" \
-            --arg instagram "$INSTAGRAM_CAPTION" \
-            --arg x "$X_CAPTION" \
-            '{
-              channel: $channel,
-              blocks: [
-                {
-                  type: "header",
-                  text: {
-                    type: "plain_text",
-                    text: "📢 SNS投稿の時間です！",
-                    emoji: true
-                  }
-                },
-                {
-                  type: "section",
-                  fields: [
-                    { type: "mrkdwn", text: "*日付:*\n\($today)" },
-                    { type: "mrkdwn", text: "*タイトル:*\n\($title)" }
-                  ]
-                },
-                { type: "divider" },
-                {
-                  type: "section",
-                  text: { type: "mrkdwn", text: "*🎵 TikTokキャプション:*\n```\($tiktok)```" }
-                },
-                { type: "divider" },
-                {
-                  type: "section",
-                  text: { type: "mrkdwn", text: "*📸 Instagramキャプション:*\n```\($instagram)```" }
-                },
-                { type: "divider" },
-                {
-                  type: "section",
-                  text: { type: "mrkdwn", text: "*🐦 X投稿文:*\n```\($x)```" }
-                }
-              ]
-            }')
 
           curl -s -X POST \
             -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
             -H "Content-type: application/json" \
-            --data "$PAYLOAD" \
+            --data "$(jq -n --arg channel "$CHANNEL" --arg text "$INSTAGRAM_CAPTION" '{channel: $channel, text: $text}')" \
             "https://slack.com/api/chat.postMessage"
