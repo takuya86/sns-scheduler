@@ -1,6 +1,9 @@
 name: SNS Post Notification
 
 on:
+  schedule:
+    - cron: '0 3 * * *'   # 12:00 JST → TikTok
+    - cron: '0 10 * * *'  # 19:00 JST → Instagram
   workflow_dispatch:
     inputs:
       date:
@@ -31,6 +34,23 @@ jobs:
             echo "today=$(TZ='Asia/Tokyo' date '+%Y-%m-%d')" >> $GITHUB_OUTPUT
           fi
 
+      - name: Determine platform
+        id: platform
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            HOUR=$(TZ='Asia/Tokyo' date '+%H')
+            if [ "$HOUR" = "12" ]; then
+              echo "tiktok=true" >> $GITHUB_OUTPUT
+              echo "instagram=false" >> $GITHUB_OUTPUT
+            elif [ "$HOUR" = "19" ]; then
+              echo "tiktok=false" >> $GITHUB_OUTPUT
+              echo "instagram=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "tiktok=true" >> $GITHUB_OUTPUT
+            echo "instagram=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Fetch schedule from data repo
         id: schedule
         env:
@@ -43,6 +63,7 @@ jobs:
           # Find today's post (specific row for same-date entries)
           TODAY="${{ steps.date.outputs.today }}"
           ROW="${{ inputs.row }}"
+          ROW="${ROW:-1}"
           LINE=$(echo "$SCHEDULE" | grep "^| $TODAY" | sed -n "${ROW}p" || true)
 
           if [ -z "$LINE" ]; then
@@ -64,8 +85,8 @@ jobs:
         run: |
           git clone --depth 1 "https://$GH_TOKEN@github.com/takuya86/obsidian-sns-data.git" data-repo
 
-      - name: Download videos from R2
-        if: steps.schedule.outputs.found == 'true'
+      - name: Download TikTok video from R2
+        if: steps.schedule.outputs.found == 'true' && steps.platform.outputs.tiktok == 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -78,6 +99,19 @@ jobs:
           mkdir -p "data-repo/videos/${TITLE}"
           aws s3 cp "s3://${R2_BUCKET_NAME}/videos/${TITLE}/tiktok.mp4" \
             "data-repo/videos/${TITLE}/tiktok.mp4" --endpoint-url="$ENDPOINT"
+
+      - name: Download Instagram video from R2
+        if: steps.schedule.outputs.found == 'true' && steps.platform.outputs.instagram == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: "auto"
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          TITLE="${{ steps.schedule.outputs.title }}"
+          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          mkdir -p "data-repo/videos/${TITLE}"
           aws s3 cp "s3://${R2_BUCKET_NAME}/videos/${TITLE}/instagram.mp4" \
             "data-repo/videos/${TITLE}/instagram.mp4" --endpoint-url="$ENDPOINT"
 
@@ -118,12 +152,13 @@ jobs:
           } >> $GITHUB_OUTPUT
 
       - name: Upload TikTok video to Slack
-        if: steps.schedule.outputs.found == 'true'
+        if: steps.schedule.outputs.found == 'true' && steps.platform.outputs.tiktok == 'true'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           TITLE="${{ steps.schedule.outputs.title }}"
           CHANNEL="${{ inputs.channel }}"
+          CHANNEL="${CHANNEL:-C0AB6SU4HUZ}"
           TODAY="${{ steps.date.outputs.today }}"
           VIDEO_PATH="data-repo/videos/$TITLE/tiktok.mp4"
           FILENAME="${TODAY}_tiktok.mp4"
@@ -151,11 +186,12 @@ jobs:
             "https://slack.com/api/files.completeUploadExternal"
 
       - name: Send TikTok caption
-        if: steps.schedule.outputs.found == 'true'
+        if: steps.schedule.outputs.found == 'true' && steps.platform.outputs.tiktok == 'true'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           CHANNEL="${{ inputs.channel }}"
+          CHANNEL="${CHANNEL:-C0AB6SU4HUZ}"
           TIKTOK_CAPTION='${{ steps.captions.outputs.tiktok }}'
 
           # ハッシュタグの前に@riko_renai_adviceを挿入
@@ -169,12 +205,13 @@ jobs:
             "https://slack.com/api/chat.postMessage"
 
       - name: Upload Instagram video to Slack
-        if: steps.schedule.outputs.found == 'true'
+        if: steps.schedule.outputs.found == 'true' && steps.platform.outputs.instagram == 'true'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           TITLE="${{ steps.schedule.outputs.title }}"
           CHANNEL="${{ inputs.channel }}"
+          CHANNEL="${CHANNEL:-C0AB6SU4HUZ}"
           TODAY="${{ steps.date.outputs.today }}"
           VIDEO_PATH="data-repo/videos/$TITLE/instagram.mp4"
           FILENAME="${TODAY}_instagram.mp4"
@@ -202,11 +239,12 @@ jobs:
             "https://slack.com/api/files.completeUploadExternal"
 
       - name: Send Instagram caption
-        if: steps.schedule.outputs.found == 'true'
+        if: steps.schedule.outputs.found == 'true' && steps.platform.outputs.instagram == 'true'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           CHANNEL="${{ inputs.channel }}"
+          CHANNEL="${CHANNEL:-C0AB6SU4HUZ}"
           INSTAGRAM_CAPTION='${{ steps.captions.outputs.instagram }}'
 
           curl -s -X POST \
