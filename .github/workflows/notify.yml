@@ -151,6 +151,28 @@ jobs:
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
+          # Extract Threads（note誘導）caption
+          THREADS_NOTE=$(echo "$CAPTIONS" | sed -n '/## Threads（note誘導）/,/## /p' | head -n -1 | tail -n +2)
+          if [ -z "$THREADS_NOTE" ]; then
+            THREADS_NOTE=$(echo "$CAPTIONS" | sed -n '/## Threads（note誘導）/,$p' | tail -n +2)
+          fi
+          {
+            echo "threads_note<<EOF"
+            echo "$THREADS_NOTE"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+          # Extract Threads（アフィリエイト）caption
+          THREADS_AFFI=$(echo "$CAPTIONS" | sed -n '/## Threads（アフィリエイト）/,/## /p' | head -n -1 | tail -n +2)
+          if [ -z "$THREADS_AFFI" ]; then
+            THREADS_AFFI=$(echo "$CAPTIONS" | sed -n '/## Threads（アフィリエイト）/,$p' | tail -n +2)
+          fi
+          {
+            echo "threads_affi<<EOF"
+            echo "$THREADS_AFFI"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
       - name: Upload TikTok video to Slack
         if: steps.schedule.outputs.found == 'true' && steps.platform.outputs.tiktok == 'true'
         env:
@@ -252,3 +274,45 @@ jobs:
             -H "Content-type: application/json" \
             --data "$(jq -n --arg channel "$CHANNEL" --arg text "$INSTAGRAM_CAPTION" '{channel: $channel, text: $text}')" \
             "https://slack.com/api/chat.postMessage"
+
+      - name: Send Threads caption (note誘導)
+        if: steps.schedule.outputs.found == 'true' && steps.platform.outputs.tiktok == 'true'
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          CHANNEL="${{ inputs.channel }}"
+          CHANNEL="${CHANNEL:-C0AB6SU4HUZ}"
+          CAPTION='${{ steps.captions.outputs.threads_note }}'
+          if [ -n "$CAPTION" ]; then
+            TITLE="${{ steps.schedule.outputs.title }}"
+            curl -s -X POST \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-type: application/json" \
+              --data "$(jq -n \
+                --arg channel "$CHANNEL" \
+                --arg text "🧵 Threads（note誘導）: $TITLE
+$CAPTION" \
+                '{channel: $channel, text: $text}')" \
+              "https://slack.com/api/chat.postMessage"
+          fi
+
+      - name: Send Threads caption (アフィリエイト)
+        if: steps.schedule.outputs.found == 'true' && steps.platform.outputs.tiktok == 'true'
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          CHANNEL="${{ inputs.channel }}"
+          CHANNEL="${CHANNEL:-C0AB6SU4HUZ}"
+          CAPTION='${{ steps.captions.outputs.threads_affi }}'
+          if [ -n "$CAPTION" ]; then
+            TITLE="${{ steps.schedule.outputs.title }}"
+            curl -s -X POST \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-type: application/json" \
+              --data "$(jq -n \
+                --arg channel "$CHANNEL" \
+                --arg text "🧵 Threads（アフィリエイト）: $TITLE
+$CAPTION" \
+                '{channel: $channel, text: $text}')" \
+              "https://slack.com/api/chat.postMessage"
+          fi
