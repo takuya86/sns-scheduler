@@ -285,13 +285,13 @@ jobs:
           CAPTION='${{ steps.captions.outputs.threads_note }}'
           if [ -n "$CAPTION" ]; then
             TITLE="${{ steps.schedule.outputs.title }}"
+            TEXT="🧵 Threads（note誘導）: ${TITLE}"$'\n'"${CAPTION}"
             curl -s -X POST \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
               -H "Content-type: application/json" \
               --data "$(jq -n \
                 --arg channel "$CHANNEL" \
-                --arg text "🧵 Threads（note誘導）: $TITLE
-$CAPTION" \
+                --arg text "$TEXT" \
                 '{channel: $channel, text: $text}')" \
               "https://slack.com/api/chat.postMessage"
           fi
@@ -306,13 +306,13 @@ $CAPTION" \
           CAPTION='${{ steps.captions.outputs.threads_affi }}'
           if [ -n "$CAPTION" ]; then
             TITLE="${{ steps.schedule.outputs.title }}"
+            TEXT="🧵 Threads（アフィリエイト）: ${TITLE}"$'\n'"${CAPTION}"
             curl -s -X POST \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
               -H "Content-type: application/json" \
               --data "$(jq -n \
                 --arg channel "$CHANNEL" \
-                --arg text "🧵 Threads（アフィリエイト）: $TITLE
-$CAPTION" \
+                --arg text "$TEXT" \
                 '{channel: $channel, text: $text}')" \
               "https://slack.com/api/chat.postMessage"
           fi
