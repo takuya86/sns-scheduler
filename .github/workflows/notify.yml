@@ -77,16 +77,12 @@ jobs:
           echo "title=$TITLE" >> $GITHUB_OUTPUT
           echo "found=true" >> $GITHUB_OUTPUT
 
-      - name: Clone data repo (sparse)
+      - name: Clone data repo
         if: steps.schedule.outputs.found == 'true'
         env:
           GH_TOKEN: ${{ secrets.DATA_REPO_PAT }}
         run: |
-          TITLE="${{ steps.schedule.outputs.title }}"
-          git clone --depth 1 --filter=blob:none --sparse \
-            "https://$GH_TOKEN@github.com/takuya86/obsidian-sns-data.git" data-repo
-          cd data-repo
-          git sparse-checkout set "videos/${TITLE}"
+          git clone --depth 1 "https://$GH_TOKEN@github.com/takuya86/obsidian-sns-data.git" data-repo
 
       - name: Fetch captions
         if: steps.schedule.outputs.found == 'true'
