@@ -77,43 +77,16 @@ jobs:
           echo "title=$TITLE" >> $GITHUB_OUTPUT
           echo "found=true" >> $GITHUB_OUTPUT
 
-      - name: Clone data repo (text only)
+      - name: Clone data repo (sparse)
         if: steps.schedule.outputs.found == 'true'
         env:
           GH_TOKEN: ${{ secrets.DATA_REPO_PAT }}
-          GIT_LFS_SKIP_SMUDGE: "1"
-        run: |
-          git clone --depth 1 "https://$GH_TOKEN@github.com/takuya86/obsidian-sns-data.git" data-repo
-
-      - name: Download TikTok video from R2
-        if: steps.schedule.outputs.found == 'true' && steps.platform.outputs.tiktok == 'true'
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: "auto"
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
           TITLE="${{ steps.schedule.outputs.title }}"
-          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          mkdir -p "data-repo/videos/${TITLE}"
-          aws s3 cp "s3://${R2_BUCKET_NAME}/videos/${TITLE}/tiktok.mp4" \
-            "data-repo/videos/${TITLE}/tiktok.mp4" --endpoint-url="$ENDPOINT"
-
-      - name: Download Instagram video from R2
-        if: steps.schedule.outputs.found == 'true' && steps.platform.outputs.instagram == 'true'
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: "auto"
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-        run: |
-          TITLE="${{ steps.schedule.outputs.title }}"
-          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          mkdir -p "data-repo/videos/${TITLE}"
-          aws s3 cp "s3://${R2_BUCKET_NAME}/videos/${TITLE}/instagram.mp4" \
-            "data-repo/videos/${TITLE}/instagram.mp4" --endpoint-url="$ENDPOINT"
+          git clone --depth 1 --filter=blob:none --sparse \
+            "https://$GH_TOKEN@github.com/takuya86/obsidian-sns-data.git" data-repo
+          cd data-repo
+          git sparse-checkout set "videos/${TITLE}"
 
       - name: Fetch captions
         if: steps.schedule.outputs.found == 'true'
